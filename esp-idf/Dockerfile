@@ -16,5 +16,3 @@ RUN apt-get update && \
     --slave   /usr/bin/clang-format clang-format /usr/bin/clang-format-${LLVM_VERSION} && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
-
-CMD ["/bin/bash"]
