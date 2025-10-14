@@ -1,7 +1,7 @@
 ARG IDF_TAG=latest
 FROM espressif/idf:${IDF_TAG}
 
-ARG LLVM_VERSION=17
+ARG LLVM_VERSION=19
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
