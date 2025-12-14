@@ -2,7 +2,7 @@ name: LLVM image
 
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - "llvm/**"
       - ".github/workflows/llvm.yml"

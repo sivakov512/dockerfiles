@@ -2,7 +2,7 @@ name: ESP-IDF image
 
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - "esp-idf/**"
       - ".github/workflows/esp-idf.yml"
