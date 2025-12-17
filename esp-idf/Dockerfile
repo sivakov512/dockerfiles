@@ -8,7 +8,7 @@ RUN apt-get update && \
     clang-${LLVM_VERSION} \
     clang-tidy-${LLVM_VERSION} \
     clang-format-${LLVM_VERSION} \
-    jq && \
+    jq curl && \
     update-alternatives \
     --install /usr/bin/clang clang /usr/bin/clang-${LLVM_VERSION} 100 \
     --slave   /usr/bin/clang++ clang++ /usr/bin/clang++-${LLVM_VERSION} \
