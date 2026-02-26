@@ -1,0 +1,109 @@
+name: ESP-Matter image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "esp-matter/**"
+      - ".github/workflows/esp-matter.yml"
+  workflow_run:
+    workflows: ["ESP-IDF image"]
+    types: [completed]
+  workflow_dispatch: {}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: esp-matter
+  LATEST_IDF_TAG: release-v5.5
+  LATEST_LLVM_VERSION: 19
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        esp_matter_branch: [release/v1.5, main]
+        idf_tag: [release-v5.4, release-v5.5]
+        llvm_version: [19]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve esp-matter SHA
+        id: esp_matter_sha
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA=$(git ls-remote https://github.com/espressif/esp-matter.git \
+            "refs/heads/${{ matrix.esp_matter_branch }}" | cut -f1)
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+      - name: Compute image URI and tags
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE_URI="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
+          MATTER_RAW="${{ matrix.esp_matter_branch }}"
+          IDF_RAW="${{ matrix.idf_tag }}"
+          LLVM="${{ matrix.llvm_version }}"
+
+          if [[ "$MATTER_RAW" == "main" ]]; then
+            MATTER_CLEAN="latest"
+          else
+            MATTER_CLEAN="${MATTER_RAW#release/v}"
+          fi
+
+          IDF_CLEAN="${IDF_RAW#release-}"
+          IDF_CLEAN="${IDF_CLEAN#v}"
+
+          TAG="${MATTER_CLEAN}-idf${IDF_CLEAN}-llvm${LLVM}"
+          TAG_NO_LLVM="${MATTER_CLEAN}-idf${IDF_CLEAN}"
+
+          echo "idf_clean=$IDF_CLEAN" >> $GITHUB_OUTPUT
+          echo "primary_tag=$IMAGE_URI:$TAG" >> $GITHUB_OUTPUT
+          {
+            echo "tags<<EOF"
+            echo "$IMAGE_URI:$TAG"
+            if [[ "$LLVM" == "${{ env.LATEST_LLVM_VERSION }}" ]]; then
+              echo "$IMAGE_URI:$TAG_NO_LLVM"
+            fi
+            if [[ "$MATTER_RAW" == "main" && "$IDF_RAW" == "${{ env.LATEST_IDF_TAG }}" && "$LLVM" == "${{ env.LATEST_LLVM_VERSION }}" ]]; then
+              echo "$IMAGE_URI:latest"
+            fi
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./esp-matter
+          push: true
+          tags: ${{ steps.vars.outputs.tags }}
+          build-args: |
+            IDF_TAG=${{ steps.vars.outputs.idf_clean }}
+            LLVM_VERSION=${{ matrix.llvm_version }}
+            ESP_MATTER_SHA=${{ steps.esp_matter_sha.outputs.sha }}
+          cache-from: type=registry,ref=${{ steps.vars.outputs.primary_tag }}
+          cache-to: type=inline
