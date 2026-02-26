@@ -6,11 +6,15 @@ on:
     paths:
       - "esp-idf/**"
       - ".github/workflows/esp-idf.yml"
+  schedule:
+    - cron: "0 3 * * 0"
   workflow_dispatch: {}
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: esp-idf
+  LATEST_IDF_TAG: release-v5.5
+  LATEST_LLVM_VERSION: 19
 
 permissions:
   contents: read
@@ -25,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        idf_tag: [release-v5.4, release-v5.5, latest]
+        idf_tag: [release-v5.4, release-v5.5]
         llvm_version: [19]
 
     steps:
@@ -45,27 +49,27 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE_URI="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
-          RAW="${{ matrix.idf_tag }}"
+          IDF_RAW="${{ matrix.idf_tag }}"
           LLVM="${{ matrix.llvm_version }}"
 
-          if [[ "$RAW" == "latest" ]]; then
-            CLEAN="latest"
-          else
-            CLEAN="${RAW#release-}"
-            CLEAN="${CLEAN#v}"
-          fi
+          IDF_CLEAN="${IDF_RAW#release-}"
+          IDF_CLEAN="${IDF_CLEAN#v}"
 
-          if [[ "$CLEAN" == "latest" ]]; then
-            T1="latest-llvm${LLVM}"
-            T2="latest"
-          else
-            T1="${CLEAN}-llvm${LLVM}"
-            T2="${CLEAN}"
-          fi
+          TAG="${IDF_CLEAN}-llvm${LLVM}"
+          TAG_NO_LLVM="${IDF_CLEAN}"
 
-          echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
-          echo "t1=$T1" >> $GITHUB_OUTPUT
-          echo "t2=$T2" >> $GITHUB_OUTPUT
+          {
+            echo "tags<<EOF"
+            echo "$IMAGE_URI:$TAG"
+            if [[ "$LLVM" == "${{ env.LATEST_LLVM_VERSION }}" ]]; then
+              echo "$IMAGE_URI:$TAG_NO_LLVM"
+            fi
+            if [[ "$IDF_RAW" == "${{ env.LATEST_IDF_TAG }}" && "$LLVM" == "${{ env.LATEST_LLVM_VERSION }}" ]]; then
+              echo "$IMAGE_URI:latest-llvm${LLVM}"
+              echo "$IMAGE_URI:latest"
+            fi
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -76,11 +80,9 @@ jobs:
         with:
           context: ./esp-idf
           push: true
-          tags: |
-            ${{ steps.vars.outputs.image_uri }}:${{ steps.vars.outputs.t1 }}
-            ${{ steps.vars.outputs.image_uri }}:${{ steps.vars.outputs.t2 }}
+          tags: ${{ steps.vars.outputs.tags }}
           build-args: |
             IDF_TAG=${{ matrix.idf_tag }}
             LLVM_VERSION=${{ matrix.llvm_version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.idf_tag }}-${{ matrix.llvm_version }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.idf_tag }}-${{ matrix.llvm_version }}
