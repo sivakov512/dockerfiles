@@ -1,39 +1,70 @@
-ARG IDF_TAG=latest
-ARG LLVM_VERSION=19
-FROM ghcr.io/sivakov512/esp-idf:${IDF_TAG}-llvm${LLVM_VERSION}
+ARG IDF_TAG
+ARG LLVM_TAG
 
-ENV ESP_MATTER_CLONE_URL=https://github.com/espressif/esp-matter.git
-ENV ESP_MATTER_CLONE_PATH=/opt/esp/esp-matter
-ENV ESP_ENTRYPOINT_FILE=/opt/esp/entrypoint.sh
+FROM ghcr.io/sivakov512/esp-idf:${IDF_TAG}-llvm${LLVM_TAG}
+SHELL ["/bin/bash", "-c"]
 
 RUN apt-get update && \
+    # Install all required stuff
     apt-get install -y --no-install-recommends \
-    git gcc g++ pkg-config cmake curl libssl-dev libdbus-1-dev \
-    libglib2.0-dev libavahi-client-dev ninja-build python3-venv python3-dev \
-    python3-pip unzip libgirepository1.0-dev libcairo2-dev libreadline-dev \
-    libevent-dev default-jre && \
+    git \
+    gcc \
+    g++ \
+    pkg-config \
+    cmake \
+    curl \
+    libssl-dev \
+    libdbus-1-dev \
+    libglib2.0-dev \
+    libavahi-client-dev \
+    ninja-build \
+    python3-venv \
+    python3-dev \
+    python3-pip \
+    unzip \
+    libgirepository1.0-dev \
+    libcairo2-dev \
+    libreadline-dev \
+    libevent-dev && \
+    # Cleanup
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* \
+    /usr/share/doc/* \
+    /usr/share/man/* \
+    /usr/share/locale/* \
+    /usr/share/info/* \
+    /var/log/* \
+    /var/cache/* \
+    /tmp/* \
+    /root/.cache
 
-ARG ESP_MATTER_SHA
+ARG GIT_CLONE_REF
+ARG GIT_CLONE_URL=https://github.com/espressif/esp-matter.git
+ARG GIT_CLONE_PATH=${IDF_TOOLS_PATH}/esp-matter
+
 RUN \
-    # Clone ESP Matter repo
-    git init "${ESP_MATTER_CLONE_PATH}" && \
-    cd "${ESP_MATTER_CLONE_PATH}" && \
-    git remote add origin "${ESP_MATTER_CLONE_URL}" && \
-    git fetch --depth 1 origin "${ESP_MATTER_SHA}" && \
-    git checkout "${ESP_MATTER_SHA}" && \
-    # Activate ESP-IDF environment
-    export IDF_PATH_FORCE=1 && \
-    . "${ESP_ENTRYPOINT_FILE}" && \
-    # Checkout ESP Matter submodules
+    # Checkout ESP Matter
+    git init "${GIT_CLONE_PATH}" && \
+    cd "${GIT_CLONE_PATH}" && \
+    git remote add origin "${GIT_CLONE_URL}" && \
+    git fetch --depth 1 origin "${GIT_CLONE_REF}" && \
+    git checkout "${GIT_CLONE_REF}" && \
     git submodule update --init --depth 1 --jobs $(nproc) && \
-    cd ./connectedhomeip/connectedhomeip && \
+    cd ${GIT_CLONE_PATH}/connectedhomeip/connectedhomeip && \
     ./scripts/checkout_submodules.py --platform esp32 linux --shallow --jobs $(nproc) && \
-    # Install ESP Matter
-    cd "${ESP_MATTER_CLONE_PATH}" && \
+    # Perform install
+    . ${ESP_IDF_INSTALLATION_PATH}/export.sh && \
+    cd ${GIT_CLONE_PATH} && \
     ./install.sh --no-host-tool && \
-    # Clean cache
-    rm -rf /root/.cache /tmp/*
+    # Cleanup
+    rm -rf ${GIT_CLONE_PATH}/.git \
+    ${GIT_CLONE_PATH}/docs \
+    ${GIT_CLONE_PATH}/examples \
+    /tmp/* \
+    /root/.cache \
+    /root/.cipd-cache-dir
 
-COPY --chmod=755 entrypoint.sh ${ESP_ENTRYPOINT_FILE}
+ENV ESP_MATTER_INSTALLATION_PATH=${GIT_CLONE_PATH}
+
+COPY --chmod=755 entrypoint.sh ${IDF_TOOLS_PATH}/entrypoint.sh
+ENTRYPOINT ["/opt/esp/entrypoint.sh"]

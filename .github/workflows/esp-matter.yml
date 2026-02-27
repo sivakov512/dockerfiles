@@ -9,13 +9,16 @@ on:
   workflow_run:
     workflows: ["ESP-IDF image"]
     types: [completed]
+  schedule:
+    - cron: "0 3 * * 0"
   workflow_dispatch: {}
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: esp-matter
-  LATEST_IDF_TAG: release-v5.5
-  LATEST_LLVM_VERSION: 19
+  LATEST_ESP_MATTER_REF: release/v1.5
+  LATEST_IDF_TAG: v5.5.3
+  LATEST_LLVM_TAG: 19
 
 permissions:
   contents: read
@@ -31,9 +34,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        esp_matter_branch: [release/v1.5, main]
-        idf_tag: [release-v5.4, release-v5.5]
-        llvm_version: [19]
+        esp_matter_ref: [release/v1.5, main]
+        esp_idf_tag: [v5.4.3, v5.5.3]
+        llvm_tag: [19]
 
     steps:
       - name: Checkout repository
@@ -46,13 +49,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve esp-matter SHA
+      - name: Resolve ESP-Matter SHA
         id: esp_matter_sha
         shell: bash
         run: |
           set -euo pipefail
           SHA=$(git ls-remote https://github.com/espressif/esp-matter.git \
-            "refs/heads/${{ matrix.esp_matter_branch }}" | cut -f1)
+            "refs/tags/${{ matrix.esp_matter_ref }}^{}" \
+            "refs/tags/${{ matrix.esp_matter_ref }}" \
+            "refs/heads/${{ matrix.esp_matter_ref }}" | head -1 | cut -f1)
           echo "sha=$SHA" >> $GITHUB_OUTPUT
 
       - name: Compute image URI and tags
@@ -61,31 +66,22 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE_URI="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
-          MATTER_RAW="${{ matrix.esp_matter_branch }}"
-          IDF_RAW="${{ matrix.idf_tag }}"
-          LLVM="${{ matrix.llvm_version }}"
+          MATTER_REF="${{ matrix.esp_matter_ref }}"
+          IDF_TAG="${{ matrix.esp_idf_tag }}"
+          LLVM="${{ matrix.llvm_tag }}"
 
-          if [[ "$MATTER_RAW" == "main" ]]; then
-            MATTER_CLEAN="latest"
-          else
-            MATTER_CLEAN="${MATTER_RAW#release/v}"
-          fi
+          MATTER_REF_CLEAN="${MATTER_REF//\//_}"
 
-          IDF_CLEAN="${IDF_RAW#release-}"
-          IDF_CLEAN="${IDF_CLEAN#v}"
+          TAG="${MATTER_REF_CLEAN}-idf_${IDF_TAG}-llvm${LLVM}"
 
-          TAG="${MATTER_CLEAN}-idf${IDF_CLEAN}-llvm${LLVM}"
-          TAG_NO_LLVM="${MATTER_CLEAN}-idf${IDF_CLEAN}"
-
-          echo "idf_clean=$IDF_CLEAN" >> $GITHUB_OUTPUT
           echo "primary_tag=$IMAGE_URI:$TAG" >> $GITHUB_OUTPUT
           {
             echo "tags<<EOF"
             echo "$IMAGE_URI:$TAG"
-            if [[ "$LLVM" == "${{ env.LATEST_LLVM_VERSION }}" ]]; then
-              echo "$IMAGE_URI:$TAG_NO_LLVM"
+            if [[ "$LLVM" == "${{ env.LATEST_LLVM_TAG }}" ]]; then
+              echo "$IMAGE_URI:${MATTER_REF_CLEAN}-idf_${IDF_TAG}"
             fi
-            if [[ "$MATTER_RAW" == "main" && "$IDF_RAW" == "${{ env.LATEST_IDF_TAG }}" && "$LLVM" == "${{ env.LATEST_LLVM_VERSION }}" ]]; then
+            if [[ "$MATTER_REF" == "${{ env.LATEST_ESP_MATTER_REF }}" && "$IDF_TAG" == "${{ env.LATEST_IDF_TAG }}" && "$LLVM" == "${{ env.LATEST_LLVM_TAG }}" ]]; then
               echo "$IMAGE_URI:latest"
             fi
             echo "EOF"
@@ -102,8 +98,8 @@ jobs:
           push: true
           tags: ${{ steps.vars.outputs.tags }}
           build-args: |
-            IDF_TAG=${{ steps.vars.outputs.idf_clean }}
-            LLVM_VERSION=${{ matrix.llvm_version }}
-            ESP_MATTER_SHA=${{ steps.esp_matter_sha.outputs.sha }}
+            IDF_TAG=${{ matrix.esp_idf_tag }}
+            LLVM_TAG=${{ matrix.llvm_tag }}
+            GIT_CLONE_REF=${{ steps.esp_matter_sha.outputs.sha }}
           cache-from: type=registry,ref=${{ steps.vars.outputs.primary_tag }}
           cache-to: type=inline
