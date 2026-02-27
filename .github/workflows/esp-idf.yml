@@ -13,8 +13,8 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: esp-idf
-  LATEST_IDF_TAG: release-v5.5
-  LATEST_LLVM_VERSION: 19
+  LATEST_IDF_REF: v5.5.3
+  LATEST_LLVM_TAG: 19
 
 permissions:
   contents: read
@@ -29,8 +29,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        idf_tag: [release-v5.4, release-v5.5]
-        llvm_version: [19]
+        esp_idf_ref: [v5.4.3, v5.5.3]
+        llvm_tag: [19]
 
     steps:
       - name: Checkout repository
@@ -43,29 +43,36 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Resolve IDF SHA
+        id: idf_sha
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA=$(git ls-remote https://github.com/espressif/esp-idf.git \
+            "refs/tags/${{ matrix.esp_idf_ref }}^{}" \
+            "refs/tags/${{ matrix.esp_idf_ref }}" \
+            "refs/heads/${{ matrix.esp_idf_ref }}" | head -1 | cut -f1)
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
       - name: Compute image URI and tags
         id: vars
         shell: bash
         run: |
           set -euo pipefail
           IMAGE_URI="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
-          IDF_RAW="${{ matrix.idf_tag }}"
-          LLVM="${{ matrix.llvm_version }}"
+          REF="${{ matrix.esp_idf_ref }}"
+          LLVM="${{ matrix.llvm_tag }}"
 
-          IDF_CLEAN="${IDF_RAW#release-}"
-          IDF_CLEAN="${IDF_CLEAN#v}"
+          TAG="${REF}-llvm${LLVM}"
 
-          TAG="${IDF_CLEAN}-llvm${LLVM}"
-          TAG_NO_LLVM="${IDF_CLEAN}"
-
+          echo "primary_tag=$IMAGE_URI:$TAG" >> $GITHUB_OUTPUT
           {
             echo "tags<<EOF"
             echo "$IMAGE_URI:$TAG"
-            if [[ "$LLVM" == "${{ env.LATEST_LLVM_VERSION }}" ]]; then
-              echo "$IMAGE_URI:$TAG_NO_LLVM"
+            if [[ "$LLVM" == "${{ env.LATEST_LLVM_TAG }}" ]]; then
+              echo "$IMAGE_URI:$REF"
             fi
-            if [[ "$IDF_RAW" == "${{ env.LATEST_IDF_TAG }}" && "$LLVM" == "${{ env.LATEST_LLVM_VERSION }}" ]]; then
-              echo "$IMAGE_URI:latest-llvm${LLVM}"
+            if [[ "$REF" == "${{ env.LATEST_IDF_REF }}" && "$LLVM" == "${{ env.LATEST_LLVM_TAG }}" ]]; then
               echo "$IMAGE_URI:latest"
             fi
             echo "EOF"
@@ -82,7 +89,7 @@ jobs:
           push: true
           tags: ${{ steps.vars.outputs.tags }}
           build-args: |
-            IDF_TAG=${{ matrix.idf_tag }}
-            LLVM_VERSION=${{ matrix.llvm_version }}
-          cache-from: type=gha,scope=${{ matrix.idf_tag }}-${{ matrix.llvm_version }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.idf_tag }}-${{ matrix.llvm_version }}
+            LLVM_TAG=${{ matrix.llvm_tag }}
+            GIT_CLONE_REF=${{ steps.idf_sha.outputs.sha }}
+          cache-from: type=registry,ref=${{ steps.vars.outputs.primary_tag }}
+          cache-to: type=inline
