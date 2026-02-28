@@ -42,6 +42,8 @@ ARG GIT_CLONE_REF
 ARG GIT_CLONE_URL=https://github.com/espressif/esp-matter.git
 ARG GIT_CLONE_PATH=${IDF_TOOLS_PATH}/esp-matter
 
+ENV IDF_CCACHE_ENABLE 1
+
 RUN \
     # Checkout ESP Matter
     git init "${GIT_CLONE_PATH}" && \

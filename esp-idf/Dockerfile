@@ -48,6 +48,8 @@ RUN git init "${GIT_CLONE_PATH}" && \
     ${GIT_CLONE_PATH}/docs \
     ${GIT_CLONE_PATH}/examples
 
+ENV IDF_CCACHE_ENABLE 1
+
 RUN cd "${GIT_CLONE_PATH}" && \
     ./install.sh all && \
     rm -rf ${IDF_TOOLS_PATH}/dist /tmp/* /root/.cache
