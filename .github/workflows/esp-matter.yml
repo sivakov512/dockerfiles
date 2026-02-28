@@ -16,7 +16,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: esp-matter
-  LATEST_ESP_MATTER_REF: release/v1.5
+  LATEST_ESP_MATTER_REF: main
   LATEST_IDF_TAG: v5.5.3
   LATEST_LLVM_TAG: 19
 
