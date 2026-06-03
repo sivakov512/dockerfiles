@@ -13,7 +13,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: esp-idf
-  LATEST_IDF_REF: v5.5.3
+  LATEST_IDF_REF: v5.5.4
   LATEST_LLVM_TAG: 19
 
 permissions:
@@ -29,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        esp_idf_ref: [v5.4.3, v5.5.3]
+        esp_idf_ref: [v5.4.4, v5.5.4]
         llvm_tag: [19]
 
     steps:

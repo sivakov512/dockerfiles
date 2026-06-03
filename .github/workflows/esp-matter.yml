@@ -15,7 +15,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: esp-matter
   LATEST_ESP_MATTER_REF: main
-  LATEST_IDF_TAG: v5.5.3
+  LATEST_IDF_TAG: v5.5.4
   LATEST_LLVM_TAG: 19
 
 permissions:
@@ -33,7 +33,7 @@ jobs:
       fail-fast: false
       matrix:
         esp_matter_ref: [release/v1.5, main]
-        esp_idf_tag: [v5.4.3, v5.5.3]
+        esp_idf_tag: [v5.4.4, v5.5.4]
         llvm_tag: [19]
 
     steps:
