@@ -6,6 +6,10 @@ on:
     paths:
       - "esp-idf/**"
       - ".github/workflows/esp-idf.yml"
+  pull_request:
+    paths:
+      - "esp-idf/**"
+      - ".github/workflows/esp-idf.yml"
   schedule:
     - cron: "0 3 * * 0"
   workflow_dispatch: {}
@@ -86,10 +90,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./esp-idf
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.vars.outputs.tags }}
           build-args: |
             LLVM_TAG=${{ matrix.llvm_tag }}
             GIT_CLONE_REF=${{ steps.idf_sha.outputs.sha }}
           cache-from: type=registry,ref=${{ steps.vars.outputs.primary_tag }}
-          cache-to: type=inline
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=inline' || '' }}
