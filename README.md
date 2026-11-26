@@ -26,8 +26,9 @@ Built on top of `llvm`. Contains [ESP-IDF](https://github.com/espressif/esp-idf)
 
 | Tags | ESP-IDF | LLVM |
 |------|---------|------|
-| `v5.5.3-llvm19`, `v5.5.3`, `latest` | v5.5.3 | 19 |
-| `v5.4.3-llvm19`, `v5.4.3` | v5.4.3 | 19 |
+| `v6.1.1-llvm19`, `v6.1.1`, `latest` | v6.1.1 | 19 |
+| `v5.5.4-llvm19`, `v5.5.4` | v5.5.4 | 19 |
+| `v5.4.4-llvm19`, `v5.4.4` | v5.4.4 | 19 |
 
 ```sh
 docker pull ghcr.io/sivakov512/esp-idf:latest
@@ -41,10 +42,10 @@ Built on top of `esp-idf`. Contains the [ESP Matter](https://github.com/espressi
 
 | Tags | ESP Matter | ESP-IDF | LLVM |
 |------|------------|---------|------|
-| `main-idf_v5.5.3-llvm19`, `main-idf_v5.5.3`, `latest` | main | v5.5.3 | 19 |
-| `main-idf_v5.4.3-llvm19`, `main-idf_v5.4.3` | main | v5.4.3 | 19 |
-| `release_v1.5-idf_v5.5.3-llvm19`, `release_v1.5-idf_v5.5.3` | release/v1.5 | v5.5.3 | 19 |
-| `release_v1.5-idf_v5.4.3-llvm19`, `release_v1.5-idf_v5.4.3` | release/v1.5 | v5.4.3 | 19 |
+| `main-idf_v5.5.4-llvm19`, `main-idf_v5.5.4`, `latest` | main | v5.5.4 | 19 |
+| `main-idf_v5.4.4-llvm19`, `main-idf_v5.4.4` | main | v5.4.4 | 19 |
+| `release_v1.5-idf_v5.5.4-llvm19`, `release_v1.5-idf_v5.5.4` | release/v1.5 | v5.5.4 | 19 |
+| `release_v1.5-idf_v5.4.4-llvm19`, `release_v1.5-idf_v5.4.4` | release/v1.5 | v5.4.4 | 19 |
 
 ```sh
 docker pull ghcr.io/sivakov512/esp-matter:latest
