@@ -10,9 +10,11 @@ on:
     paths:
       - "esp-matter/**"
       - ".github/workflows/esp-matter.yml"
-  # Picks up updates of the official base image
-  schedule:
-    - cron: "0 4 * * 0"
+  # Rebuild on top of a freshly published esp-idf image
+  workflow_run:
+    workflows: ["ESP-IDF image"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch: {}
 
 env:
@@ -23,29 +25,32 @@ env:
 permissions:
   contents: read
   packages: write
-  attestations: write
-  id-token: write
 
 jobs:
-  build-and-push-image:
-    runs-on: ubuntu-latest
+  # Each architecture is built and tested on its own native runner, then
+  # pushed by digest; the merge job joins them under the tags.
+  build:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ${{ matrix.runner }}
 
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # base_tag: tag of the official espressif/esp-matter image
-          - base_tag: release-v1.6.1_idf_v6.0.2
+        version:
+          # esp-matter release/v1.6.1 wants ESP-IDF v6.0.2
+          - esp_matter_ref: release/v1.6.1
+            idf_tag: v6.0.2
             tag: release_v1.6.1-idf_v6.0.2
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
 
       - name: Log in to the Container registry
         uses: docker/login-action@v3
@@ -54,50 +59,122 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute image URI and tags
+      - name: Compute image URI
         id: vars
-        shell: bash
         run: |
-          set -euo pipefail
-          IMAGE_URI="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
-          TAG="${{ matrix.tag }}"
-
-          echo "primary_tag=$IMAGE_URI:$TAG" >> $GITHUB_OUTPUT
-          {
-            echo "tags<<EOF"
-            echo "$IMAGE_URI:$TAG"
-            if [[ "$TAG" == "${{ env.LATEST_TAG }}" ]]; then
-              echo "$IMAGE_URI:latest"
-            fi
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
+          echo "image_uri=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}" >> "$GITHUB_OUTPUT"
+          echo "base_image=${{ env.REGISTRY }}/${{ github.repository_owner }}/esp-idf" >> "$GITHUB_OUTPUT"
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push Docker image
-        id: push
+      - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
           context: ./esp-matter
-          push: ${{ github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
-          tags: ${{ steps.vars.outputs.tags }}
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: local/esp-matter:test
           build-args: |
-            BASE_TAG=${{ matrix.base_tag }}
-          cache-from: type=registry,ref=${{ steps.vars.outputs.primary_tag }}
-          cache-to: ${{ github.event_name != 'pull_request' && 'type=inline' || '' }}
+            BASE_IMAGE=${{ steps.vars.outputs.base_image }}
+            IDF_TAG=${{ matrix.version.idf_tag }}
+            ESP_MATTER_REF=${{ matrix.version.esp_matter_ref }}
+          cache-from: type=registry,ref=${{ steps.vars.outputs.image_uri }}:${{ matrix.version.tag }}
 
       - name: Smoke test
-        if: github.event_name == 'pull_request'
         run: |
-          docker run --rm -w /tmp --entrypoint bash ${{ steps.vars.outputs.primary_tag }} -c '
+          docker run --rm -w /tmp --entrypoint bash local/esp-matter:test -c '
             . /opt/esp/entrypoint.sh
             set -euo pipefail
             test "$PWD" = /tmp
             clang-tidy --version | grep -q Espressif
             clang-format --version | grep -q Espressif
-            clang-tidy --version | head -1
-            idf.py --version && test -n "$ESP_MATTER_PATH" && echo "ESP_MATTER_PATH=$ESP_MATTER_PATH"
+            idf.py --version
+            test -d "$ESP_MATTER_PATH/connectedhomeip/connectedhomeip/src"
+            echo "ESP_MATTER_PATH=$ESP_MATTER_PATH"
           '
-          docker run --rm ${{ steps.vars.outputs.primary_tag }} idf.py --version
+          docker run --rm local/esp-matter:test idf.py --version
+          docker image ls local/esp-matter:test
+
+      - name: Lint the project template with Matter enabled
+        run: |
+          docker run --rm --entrypoint bash local/esp-matter:test -c '
+            . /opt/esp/entrypoint.sh
+            set -euo pipefail
+            git clone --depth 1 https://github.com/sivakov512/esp-idf-project-template.git /tmp/template
+            cd /tmp/template
+            sed -i "s/set(ESP_MATTER_ENABLED false)/set(ESP_MATTER_ENABLED true)/" CMakeLists.txt
+            grep -q "set(ESP_MATTER_ENABLED true)" CMakeLists.txt
+            make esp-lint check-format
+          '
+
+      - name: Push by digest
+        id: push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./esp-matter
+          platforms: linux/${{ matrix.arch }}
+          build-args: |
+            BASE_IMAGE=${{ steps.vars.outputs.base_image }}
+            IDF_TAG=${{ matrix.version.idf_tag }}
+            ESP_MATTER_REF=${{ matrix.version.esp_matter_ref }}
+          outputs: type=image,name=${{ steps.vars.outputs.image_uri }},push-by-digest=true,name-canonical=true,push=true
+          cache-to: type=inline
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.push.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.version.tag }}-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: [release_v1.6.1-idf_v6.0.2]
+
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ matrix.tag }}-*
+          merge-multiple: true
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create the multi-arch tags
+        working-directory: /tmp/digests
+        run: |
+          set -euo pipefail
+          IMAGE_URI="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
+          TAG="${{ matrix.tag }}"
+          TAGS=(-t "$IMAGE_URI:$TAG")
+          if [[ "$TAG" == "${{ env.LATEST_TAG }}" ]]; then
+            TAGS+=(-t "$IMAGE_URI:latest")
+          fi
+          docker buildx imagetools create "${TAGS[@]}" $(printf "$IMAGE_URI@sha256:%s " *)
+          docker buildx imagetools inspect "$IMAGE_URI:$TAG"
