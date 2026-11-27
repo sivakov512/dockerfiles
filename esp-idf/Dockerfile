@@ -74,14 +74,14 @@ ENV ESP_IDF_INSTALLATION_PATH=${IDF_CLONE_PATH}
 ARG ESP_CLANG_VERSION=esp-21.1.3_20260408
 ARG ESP_CLANG_SHA256_AMD64=6e62bf1973b57b5388aad281ce1463e953e70b3d8df74ef4668c70f31fbeda63
 ARG ESP_CLANG_SHA256_ARM64=a25e5446ba3aa4bccfafa4328cec240c5b1ae7638978d868c26777c4ceca241b
-ARG TARGETARCH
 ENV ESP_CLANG_PATH=/opt/esp-clang
 
 RUN set -euo pipefail && \
-    case "${TARGETARCH:-amd64}" in \
+    DEB_ARCH="$(dpkg --print-architecture)" && \
+    case "${DEB_ARCH}" in \
       amd64) ARCH=x86_64; SHA256="${ESP_CLANG_SHA256_AMD64}" ;; \
       arm64) ARCH=aarch64; SHA256="${ESP_CLANG_SHA256_ARM64}" ;; \
-      *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+      *) echo "Unsupported architecture: ${DEB_ARCH}" >&2; exit 1 ;; \
     esac && \
     curl -fsSL -o /tmp/esp-clang.tar.xz \
       "https://github.com/espressif/llvm-project/releases/download/${ESP_CLANG_VERSION}/clang-${ESP_CLANG_VERSION}-${ARCH}-linux-gnu.tar.xz" && \
