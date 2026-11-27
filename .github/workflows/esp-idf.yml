@@ -94,3 +94,14 @@ jobs:
           '
           docker run --rm ${{ steps.vars.outputs.primary_tag }} idf.py --version
           docker image inspect --format 'Uncompressed size: {{.Size}} bytes' ${{ steps.vars.outputs.primary_tag }}
+
+      - name: Lint the project template with the image
+        if: github.event_name == 'pull_request'
+        run: |
+          docker run --rm --entrypoint bash ${{ steps.vars.outputs.primary_tag }} -c '
+            . /opt/esp/entrypoint.sh
+            set -euo pipefail
+            git clone --depth 1 https://github.com/sivakov512/esp-idf-project-template.git /tmp/template
+            cd /tmp/template
+            make esp-lint check-format host-test
+          '
