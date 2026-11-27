@@ -2,33 +2,17 @@
 
 Docker images for Espressif embedded development, published to `ghcr.io/sivakov512`.
 
+Each image is an official Espressif image plus [Espressif LLVM](https://github.com/espressif/llvm-project) (`esp-clang`) for `clang-tidy` and `clang-format`. ESP-IDF installs `esp-clang` only on request, so the official images do not have it. The version is the one ESP-IDF v6.1.1 lists in `tools/tools.json`, so CI checks run with the same tools as a local IDF v6.1.1 install.
+
 ## Images
-
-### `llvm`
-
-Ubuntu 24.04 with the LLVM toolchain configured via `update-alternatives`.
-
-**Includes:** `clang`, `clang++`, `clang-tidy`, `clang-format`, `lld`
-
-| Tags | LLVM |
-|------|------|
-| `19`, `latest` | 19 |
-
-```sh
-docker pull ghcr.io/sivakov512/llvm:latest
-```
-
----
 
 ### `esp-idf`
 
-Built on top of `llvm`. Contains [ESP-IDF](https://github.com/espressif/esp-idf) with all toolchains pre-installed. `docs` and `examples` are stripped to reduce image size. The entrypoint sources `export.sh` automatically.
+Built on top of the official [`espressif/idf`](https://hub.docker.com/r/espressif/idf) image. The entrypoint sources `export.sh` automatically.
 
-| Tags | ESP-IDF | LLVM |
-|------|---------|------|
-| `v6.1.1-llvm19`, `v6.1.1`, `latest` | v6.1.1 | 19 |
-| `v5.5.4-llvm19`, `v5.5.4` | v5.5.4 | 19 |
-| `v5.4.4-llvm19`, `v5.4.4` | v5.4.4 | 19 |
+| Tags | ESP-IDF | esp-clang |
+|------|---------|-----------|
+| `v6.1.1`, `latest` | v6.1.1 | 21.1.3 |
 
 ```sh
 docker pull ghcr.io/sivakov512/esp-idf:latest
@@ -38,18 +22,23 @@ docker pull ghcr.io/sivakov512/esp-idf:latest
 
 ### `esp-matter`
 
-Built on top of `esp-idf`. Contains the [ESP Matter](https://github.com/espressif/esp-matter) SDK. `docs` and `examples` are stripped to reduce image size. The entrypoint sources both `esp-idf/export.sh` and `esp-matter/export.sh`.
+Built on top of the official [`espressif/esp-matter`](https://hub.docker.com/r/espressif/esp-matter) image. The entrypoint sources both `esp-idf/export.sh` and `esp-matter/export.sh` and keeps the working directory, so it can also be sourced from CI steps.
 
-| Tags | ESP Matter | ESP-IDF | LLVM |
-|------|------------|---------|------|
-| `main-idf_v5.5.4-llvm19`, `main-idf_v5.5.4`, `latest` | main | v5.5.4 | 19 |
-| `main-idf_v5.4.4-llvm19`, `main-idf_v5.4.4` | main | v5.4.4 | 19 |
-| `release_v1.5-idf_v5.5.4-llvm19`, `release_v1.5-idf_v5.5.4` | release/v1.5 | v5.5.4 | 19 |
-| `release_v1.5-idf_v5.4.4-llvm19`, `release_v1.5-idf_v5.4.4` | release/v1.5 | v5.4.4 | 19 |
+| Tags | ESP Matter | ESP-IDF | esp-clang |
+|------|------------|---------|-----------|
+| `release_v1.6.1-idf_v6.0.2`, `latest` | release/v1.6.1 | v6.0.2 | 21.1.3 |
+
+ESP-IDF v6.0.2 is the version esp-matter recommends for release/v1.6.1.
 
 ```sh
 docker pull ghcr.io/sivakov512/esp-matter:latest
 ```
+
+---
+
+### Old tags
+
+Older tags stay published but are no longer rebuilt: `llvm:19` and `llvm:latest`, `esp-idf:*-llvm19` and `esp-idf:v5.*`, `esp-matter:*-idf_v5.*`.
 
 ## Usage
 
@@ -63,10 +52,9 @@ Replace the image with `esp-matter` for Matter projects.
 
 ## CI/CD
 
-Images are built and pushed via GitHub Actions:
+Images are built via GitHub Actions:
 
-- **On push** to `main` when files in the relevant image directory change.
-- **On a weekly schedule** (every Sunday at 03:00 UTC) — `esp-idf` only.
+- **On pull requests** that change an image: built, not pushed.
+- **On push** to `main` when files in the relevant image directory change: built and pushed.
+- **On a weekly schedule** (Sundays, 03:00 UTC for `esp-idf`, 04:00 UTC for `esp-matter`), to pick up updates of the official base images.
 - **Manually** via `workflow_dispatch`.
-
-The `esp-matter` workflow triggers automatically after `esp-idf` completes successfully.
