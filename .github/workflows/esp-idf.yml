@@ -22,18 +22,24 @@ env:
 permissions:
   contents: read
   packages: write
-  attestations: write
-  id-token: write
 
 jobs:
-  build-and-push-image:
-    runs-on: ubuntu-latest
+  # Each architecture is built and tested on its own native runner, then
+  # pushed by digest; the merge job joins them under the version tags.
+  build:
+    runs-on: ${{ matrix.runner }}
 
     strategy:
       fail-fast: false
       matrix:
         # v6.0.2: base of the esp-matter image (esp-matter release/v1.6.1 wants it)
         idf_ref: [v6.0.2, v6.1.1]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
 
     steps:
       - name: Checkout repository
@@ -46,62 +52,116 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute image URI and tags
+      - name: Compute image URI
         id: vars
-        shell: bash
-        run: |
-          set -euo pipefail
-          IMAGE_URI="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
-          IDF="${{ matrix.idf_ref }}"
-
-          echo "primary_tag=$IMAGE_URI:$IDF" >> $GITHUB_OUTPUT
-          {
-            echo "tags<<EOF"
-            echo "$IMAGE_URI:$IDF"
-            if [[ "$IDF" == "${{ env.LATEST_IDF_REF }}" ]]; then
-              echo "$IMAGE_URI:latest"
-            fi
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
+        run: echo "image_uri=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push Docker image
-        id: push
+      - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
           context: ./esp-idf
-          push: ${{ github.event_name != 'pull_request' }}
-          load: ${{ github.event_name == 'pull_request' }}
-          tags: ${{ steps.vars.outputs.tags }}
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: local/esp-idf:test
           build-args: |
             IDF_REF=${{ matrix.idf_ref }}
-          cache-from: type=registry,ref=${{ steps.vars.outputs.primary_tag }}
-          cache-to: ${{ github.event_name != 'pull_request' && 'type=inline' || '' }}
+          cache-from: type=registry,ref=${{ steps.vars.outputs.image_uri }}:${{ matrix.idf_ref }}
 
       - name: Smoke test
-        if: github.event_name == 'pull_request'
         run: |
-          docker run --rm -w /tmp --entrypoint bash ${{ steps.vars.outputs.primary_tag }} -c '
+          docker run --rm -w /tmp --entrypoint bash local/esp-idf:test -c '
             . /opt/esp/entrypoint.sh
             set -euo pipefail
             test "$PWD" = /tmp
+            test "$(uname -m)" = "$(case ${{ matrix.arch }} in amd64) echo x86_64;; arm64) echo aarch64;; esac)"
             clang-tidy --version | grep -q Espressif
             clang-format --version | grep -q Espressif
             clang-tidy --version | head -1
             idf.py --version
           '
-          docker run --rm ${{ steps.vars.outputs.primary_tag }} idf.py --version
-          docker image inspect --format 'Uncompressed size: {{.Size}} bytes' ${{ steps.vars.outputs.primary_tag }}
+          docker run --rm local/esp-idf:test idf.py --version
+          docker image ls local/esp-idf:test
 
       - name: Lint the project template with the image
-        if: github.event_name == 'pull_request'
         run: |
-          docker run --rm --entrypoint bash ${{ steps.vars.outputs.primary_tag }} -c '
+          docker run --rm --entrypoint bash local/esp-idf:test -c '
             . /opt/esp/entrypoint.sh
             set -euo pipefail
             git clone --depth 1 https://github.com/sivakov512/esp-idf-project-template.git /tmp/template
             cd /tmp/template
             make esp-lint check-format host-test
+            idf.py set-target esp32c3
+            make esp-lint
           '
+
+      - name: Push by digest
+        id: push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./esp-idf
+          platforms: linux/${{ matrix.arch }}
+          build-args: |
+            IDF_REF=${{ matrix.idf_ref }}
+          outputs: type=image,name=${{ steps.vars.outputs.image_uri }},push-by-digest=true,name-canonical=true,push=true
+          cache-to: type=inline
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.push.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.idf_ref }}-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        idf_ref: [v6.0.2, v6.1.1]
+
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ matrix.idf_ref }}-*
+          merge-multiple: true
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create the multi-arch tags
+        working-directory: /tmp/digests
+        run: |
+          set -euo pipefail
+          IMAGE_URI="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
+          IDF="${{ matrix.idf_ref }}"
+          TAGS=(-t "$IMAGE_URI:$IDF")
+          if [[ "$IDF" == "${{ env.LATEST_IDF_REF }}" ]]; then
+            TAGS+=(-t "$IMAGE_URI:latest")
+          fi
+          docker buildx imagetools create "${TAGS[@]}" $(printf "$IMAGE_URI@sha256:%s " *)
+          docker buildx imagetools inspect "$IMAGE_URI:$IDF"
