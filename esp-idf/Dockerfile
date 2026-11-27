@@ -1,60 +1,36 @@
-ARG LLVM_TAG
-FROM ghcr.io/sivakov512/llvm:${LLVM_TAG}
+# Official ESP-IDF image plus Espressif LLVM for clang-tidy and clang-format.
+ARG IDF_TAG
+FROM espressif/idf:${IDF_TAG}
 SHELL ["/bin/bash", "-c"]
 
-RUN apt-get update && \
-    # Install all required stuff
-    apt-get install -y --no-install-recommends \
-    git \
-    wget \
-    flex \
-    bison \
-    gperf \
-    python3 \
-    python3-pip \
-    python3-venv \
-    cmake \
-    ninja-build \
-    ccache \
-    libffi-dev \
-    libssl-dev \
-    dfu-util \
-    libusb-1.0-0 && \
-    # Cleanup
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* \
-    /usr/share/doc/* \
-    /usr/share/man/* \
-    /usr/share/locale/* \
-    /usr/share/info/* \
-    /var/log/* \
-    /var/cache/* \
-    /tmp/* \
-    /root/.cache
+# Espressif LLVM (clang-tidy, clang-format) for the lint checks. ESP-IDF
+# installs it only on request, so the official image does not have it. Keep the
+# version equal in esp-idf/ and esp-matter/: it is esp-clang from the IDF v6.1.1
+# tools/tools.json, the same one a local IDF v6.1.1 installs.
+ARG ESP_CLANG_VERSION=esp-21.1.3_20260408
+ARG ESP_CLANG_SHA256_AMD64=6e62bf1973b57b5388aad281ce1463e953e70b3d8df74ef4668c70f31fbeda63
+ARG ESP_CLANG_SHA256_ARM64=a25e5446ba3aa4bccfafa4328cec240c5b1ae7638978d868c26777c4ceca241b
+ARG TARGETARCH
+ENV ESP_CLANG_PATH=/opt/esp-clang
 
-ENV IDF_TOOLS_PATH=/opt/esp
+RUN set -euo pipefail && \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) ARCH=x86_64; SHA256="${ESP_CLANG_SHA256_AMD64}" ;; \
+      arm64) ARCH=aarch64; SHA256="${ESP_CLANG_SHA256_ARM64}" ;; \
+      *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac && \
+    if ! command -v xz >/dev/null; then \
+      apt-get update && \
+      apt-get install -y --no-install-recommends xz-utils && \
+      rm -rf /var/lib/apt/lists/*; \
+    fi && \
+    curl -fsSL -o /tmp/esp-clang.tar.xz \
+      "https://github.com/espressif/llvm-project/releases/download/${ESP_CLANG_VERSION}/clang-${ESP_CLANG_VERSION}-${ARCH}-linux-gnu.tar.xz" && \
+    echo "${SHA256}  /tmp/esp-clang.tar.xz" | sha256sum -c - && \
+    mkdir -p "${ESP_CLANG_PATH}" && \
+    tar -xJf /tmp/esp-clang.tar.xz -C "${ESP_CLANG_PATH}" --strip-components=1 && \
+    rm -f /tmp/esp-clang.tar.xz && \
+    "${ESP_CLANG_PATH}/bin/clang-tidy" --version && \
+    "${ESP_CLANG_PATH}/bin/clang-format" --version
 
-ARG GIT_CLONE_REF
-ARG GIT_CLONE_URL=https://github.com/espressif/esp-idf.git
-ARG GIT_CLONE_PATH=${IDF_TOOLS_PATH}/esp-idf
-
-RUN git init "${GIT_CLONE_PATH}" && \
-    cd "${GIT_CLONE_PATH}" && \
-    git remote add origin "${GIT_CLONE_URL}" && \
-    git fetch --depth 1 origin "${GIT_CLONE_REF}" && \
-    git checkout "${GIT_CLONE_REF}" && \
-    git submodule update --init --recursive --depth 1 --jobs $(nproc) && \
-    rm -rf ${GIT_CLONE_PATH}/.git \
-    ${GIT_CLONE_PATH}/docs \
-    ${GIT_CLONE_PATH}/examples
-
-ENV IDF_CCACHE_ENABLE 1
-
-RUN cd "${GIT_CLONE_PATH}" && \
-    ./install.sh all && \
-    rm -rf ${IDF_TOOLS_PATH}/dist /tmp/* /root/.cache
-
-ENV ESP_IDF_INSTALLATION_PATH=${GIT_CLONE_PATH}
-
-COPY --chmod=755 entrypoint.sh ${IDF_TOOLS_PATH}/entrypoint.sh
-ENTRYPOINT ["/opt/esp/entrypoint.sh"]
+ENV PATH=${ESP_CLANG_PATH}/bin:${PATH}

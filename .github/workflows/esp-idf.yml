@@ -10,6 +10,7 @@ on:
     paths:
       - "esp-idf/**"
       - ".github/workflows/esp-idf.yml"
+  # Picks up updates of the official base image
   schedule:
     - cron: "0 3 * * 0"
   workflow_dispatch: {}
@@ -17,8 +18,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: esp-idf
-  LATEST_IDF_REF: v6.1.1
-  LATEST_LLVM_TAG: 19
+  LATEST_IDF_TAG: v6.1.1
 
 permissions:
   contents: read
@@ -33,8 +33,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        esp_idf_ref: [v5.4.4, v5.5.4, v6.1.1]
-        llvm_tag: [19]
+        # Tags of the official espressif/idf image
+        idf_tag: [v6.1.1]
 
     steps:
       - name: Checkout repository
@@ -47,36 +47,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve IDF SHA
-        id: idf_sha
-        shell: bash
-        run: |
-          set -euo pipefail
-          SHA=$(git ls-remote https://github.com/espressif/esp-idf.git \
-            "refs/tags/${{ matrix.esp_idf_ref }}^{}" \
-            "refs/tags/${{ matrix.esp_idf_ref }}" \
-            "refs/heads/${{ matrix.esp_idf_ref }}" | head -1 | cut -f1)
-          echo "sha=$SHA" >> $GITHUB_OUTPUT
-
       - name: Compute image URI and tags
         id: vars
         shell: bash
         run: |
           set -euo pipefail
           IMAGE_URI="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}"
-          REF="${{ matrix.esp_idf_ref }}"
-          LLVM="${{ matrix.llvm_tag }}"
+          IDF="${{ matrix.idf_tag }}"
 
-          TAG="${REF}-llvm${LLVM}"
-
-          echo "primary_tag=$IMAGE_URI:$TAG" >> $GITHUB_OUTPUT
+          echo "primary_tag=$IMAGE_URI:$IDF" >> $GITHUB_OUTPUT
           {
             echo "tags<<EOF"
-            echo "$IMAGE_URI:$TAG"
-            if [[ "$LLVM" == "${{ env.LATEST_LLVM_TAG }}" ]]; then
-              echo "$IMAGE_URI:$REF"
-            fi
-            if [[ "$REF" == "${{ env.LATEST_IDF_REF }}" && "$LLVM" == "${{ env.LATEST_LLVM_TAG }}" ]]; then
+            echo "$IMAGE_URI:$IDF"
+            if [[ "$IDF" == "${{ env.LATEST_IDF_TAG }}" ]]; then
               echo "$IMAGE_URI:latest"
             fi
             echo "EOF"
@@ -91,9 +74,23 @@ jobs:
         with:
           context: ./esp-idf
           push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.vars.outputs.tags }}
           build-args: |
-            LLVM_TAG=${{ matrix.llvm_tag }}
-            GIT_CLONE_REF=${{ steps.idf_sha.outputs.sha }}
+            IDF_TAG=${{ matrix.idf_tag }}
           cache-from: type=registry,ref=${{ steps.vars.outputs.primary_tag }}
           cache-to: ${{ github.event_name != 'pull_request' && 'type=inline' || '' }}
+
+      - name: Smoke test
+        if: github.event_name == 'pull_request'
+        run: |
+          docker run --rm -w /tmp --entrypoint bash ${{ steps.vars.outputs.primary_tag }} -c '
+            . /opt/esp/entrypoint.sh
+            set -euo pipefail
+            test "$PWD" = /tmp
+            clang-tidy --version | grep -q Espressif
+            clang-format --version | grep -q Espressif
+            clang-tidy --version | head -1
+            idf.py --version
+          '
+          docker run --rm ${{ steps.vars.outputs.primary_tag }} idf.py --version
