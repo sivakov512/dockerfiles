@@ -1,42 +1,68 @@
-# Official ESP-Matter image plus Espressif LLVM for clang-tidy and clang-format.
-ARG BASE_TAG
-FROM espressif/esp-matter:${BASE_TAG}
+# ESP-Matter SDK on top of our esp-idf image, which brings ESP-IDF and
+# Espressif LLVM (clang-tidy, clang-format). Built from source rather than on
+# the official espressif/esp-matter image: that one is about 6 GB compressed
+# and does not fit next to a job on a private-repo GitHub runner.
+ARG BASE_IMAGE=ghcr.io/sivakov512/esp-idf
+ARG IDF_TAG=v6.0.2
+FROM ${BASE_IMAGE}:${IDF_TAG}
 SHELL ["/bin/bash", "-c"]
+ARG DEBIAN_FRONTEND=noninteractive
 
-# Espressif LLVM (clang-tidy, clang-format) for the lint checks. ESP-IDF
-# installs it only on request, so the official image does not have it. Keep the
-# version equal in esp-idf/ and esp-matter/: it is esp-clang from the IDF v6.1.1
-# tools/tools.json, the same one a local IDF v6.1.1 installs.
-ARG ESP_CLANG_VERSION=esp-21.1.3_20260408
-ARG ESP_CLANG_SHA256_AMD64=6e62bf1973b57b5388aad281ce1463e953e70b3d8df74ef4668c70f31fbeda63
-ARG ESP_CLANG_SHA256_ARM64=a25e5446ba3aa4bccfafa4328cec240c5b1ae7638978d868c26777c4ceca241b
-ARG TARGETARCH
-ENV ESP_CLANG_PATH=/opt/esp-clang
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libavahi-client-dev \
+    libcairo2-dev \
+    libdbus-1-dev \
+    libevent-dev \
+    libgirepository1.0-dev \
+    libglib2.0-dev \
+    libreadline-dev \
+    pkg-config \
+    python3-dev \
+    unzip && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* \
+    /usr/share/doc/* \
+    /usr/share/man/* \
+    /usr/share/locale/* \
+    /usr/share/info/* \
+    /var/log/* \
+    /var/cache/* \
+    /tmp/* \
+    /root/.cache
 
-RUN set -euo pipefail && \
-    case "${TARGETARCH:-amd64}" in \
-      amd64) ARCH=x86_64; SHA256="${ESP_CLANG_SHA256_AMD64}" ;; \
-      arm64) ARCH=aarch64; SHA256="${ESP_CLANG_SHA256_ARM64}" ;; \
-      *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac && \
-    if ! command -v xz >/dev/null; then \
-      apt-get update && \
-      apt-get install -y --no-install-recommends xz-utils && \
-      rm -rf /var/lib/apt/lists/*; \
-    fi && \
-    curl -fsSL -o /tmp/esp-clang.tar.xz \
-      "https://github.com/espressif/llvm-project/releases/download/${ESP_CLANG_VERSION}/clang-${ESP_CLANG_VERSION}-${ARCH}-linux-gnu.tar.xz" && \
-    echo "${SHA256}  /tmp/esp-clang.tar.xz" | sha256sum -c - && \
-    mkdir -p "${ESP_CLANG_PATH}" && \
-    tar -xJf /tmp/esp-clang.tar.xz -C "${ESP_CLANG_PATH}" --strip-components=1 && \
-    rm -f /tmp/esp-clang.tar.xz && \
-    "${ESP_CLANG_PATH}/bin/clang-tidy" --version && \
-    "${ESP_CLANG_PATH}/bin/clang-format" --version
+ARG ESP_MATTER_REF
+ARG ESP_MATTER_CLONE_URL=https://github.com/espressif/esp-matter.git
+ENV ESP_MATTER_PATH=${IDF_TOOLS_PATH}/esp-matter
 
-ENV PATH=${ESP_CLANG_PATH}/bin:${PATH}
+# Shallow clones and only the connectedhomeip submodules for esp32 (host tools
+# are not built), then without .git and docs. Examples stay: projects use
+# examples/common from esp-matter and examples/platform/esp32 from
+# connectedhomeip. Of the CIPD packages the connectedhomeip bootstrap fetches,
+# the ESP32 build needs only gn and zap: the ARM GCC toolchain and pigweed's
+# LLVM, QEMU and sysroots (about 4 GB) go.
+RUN git init "${ESP_MATTER_PATH}" && \
+    cd "${ESP_MATTER_PATH}" && \
+    git remote add origin "${ESP_MATTER_CLONE_URL}" && \
+    git fetch --depth 1 origin "${ESP_MATTER_REF}" && \
+    git checkout FETCH_HEAD && \
+    git submodule update --init --depth 1 --jobs $(nproc) && \
+    cd connectedhomeip/connectedhomeip && \
+    ./scripts/checkout_submodules.py --platform esp32 --shallow && \
+    . "${IDF_TOOLS_PATH}/esp-idf/export.sh" && \
+    cd "${ESP_MATTER_PATH}" && \
+    ./install.sh --no-host-tool && \
+    CIPD="${ESP_MATTER_PATH}/connectedhomeip/connectedhomeip/.environment/cipd/packages" && \
+    rm -rf "${CIPD}/arm" && \
+    cd "${CIPD}/pigweed" && \
+    find bin -mindepth 1 ! -name ninja ! -name protoc ! -name make -exec rm -rf {} + && \
+    rm -rf lib clang_sysroot share openocd libexec include && \
+    find "${ESP_MATTER_PATH}" -name .git -prune -exec rm -rf {} + && \
+    rm -rf "${ESP_MATTER_PATH}/docs" \
+    "${ESP_MATTER_PATH}/connectedhomeip/connectedhomeip/docs" \
+    /tmp/* \
+    /root/.cache \
+    /root/.cipd-cache-dir
 
-# The official entrypoint cd's into $IDF_PATH and $ESP_MATTER_PATH. This one
-# keeps the working directory, so CI can also source it (e.g. through BASH_ENV).
-COPY --chmod=755 entrypoint.sh /opt/esp/entrypoint.sh
-ENTRYPOINT ["/opt/esp/entrypoint.sh"]
+COPY --chmod=755 entrypoint.sh ${IDF_TOOLS_PATH}/entrypoint.sh
 CMD ["/bin/bash"]
