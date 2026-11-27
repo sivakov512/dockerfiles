@@ -23,7 +23,7 @@ docker pull ghcr.io/sivakov512/esp-idf:latest
 
 ### `esp-matter`
 
-Built on top of the official [`espressif/esp-matter`](https://hub.docker.com/r/espressif/esp-matter) image. The entrypoint sources both `esp-idf/export.sh` and `esp-matter/export.sh` and keeps the working directory, so it can also be sourced from CI steps.
+[ESP Matter](https://github.com/espressif/esp-matter) on top of the `esp-idf` image of the matching ESP-IDF version. It is built from source rather than on the official `espressif/esp-matter` image (about 6 GB compressed): shallow clones without `.git` and docs, connectedhomeip submodules for esp32 only, and of the connectedhomeip CIPD packages only what the ESP32 build uses. The entrypoint sources both `esp-idf/export.sh` and `esp-matter/export.sh` and keeps the working directory, so it can also be sourced from CI steps. Built for `linux/amd64` and `linux/arm64`.
 
 | Tags | ESP Matter | ESP-IDF | esp-clang |
 |------|------------|---------|-----------|
@@ -57,5 +57,5 @@ Images are built via GitHub Actions:
 
 - **On pull requests** that change an image: built, not pushed.
 - **On push** to `main` when files in the relevant image directory change: built and pushed.
-- **On a weekly schedule** (Sundays, 03:00 UTC for `esp-idf`, 04:00 UTC for `esp-matter`), to pick up updates of the base images.
+- **On a weekly schedule** (Sundays, 03:00 UTC) for `esp-idf`; `esp-matter` is rebuilt after each successful `esp-idf` build on `main`.
 - **Manually** via `workflow_dispatch`.
