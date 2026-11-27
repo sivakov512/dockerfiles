@@ -8,7 +8,7 @@ Each image carries [Espressif LLVM](https://github.com/espressif/llvm-project) (
 
 ### `esp-idf`
 
-Ubuntu 24.04 with [ESP-IDF](https://github.com/espressif/esp-idf) and all its toolchains. IDF is a shallow clone without `.git`, `docs` and `examples`, which keeps the image small enough for private-repo GitHub runners (the official `espressif/idf` image is about 4 GB compressed). The entrypoint sources `export.sh` automatically.
+Ubuntu 24.04 with [ESP-IDF](https://github.com/espressif/esp-idf) and all its toolchains. IDF is a shallow clone without `.git`, `docs` and `examples`, which keeps the image small enough for private-repo GitHub runners (the official `espressif/idf` image is about 4 GB compressed). The entrypoint sources `export.sh` automatically. Built for `linux/amd64` and `linux/arm64`, so it also runs natively on Apple Silicon.
 
 | Tags | ESP-IDF | esp-clang |
 |------|---------|-----------|
